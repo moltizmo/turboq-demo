@@ -1,13 +1,13 @@
-# TurboQuant RAG Demo (v3)
+# TurboQuant RAG Demo (v4)
 
-A demonstration of **TurboQuant**-inspired vector compression applied to Retrieval-Augmented Generation (RAG) pipelines. Compares full-precision float32 embeddings against **4-bit, 6-bit, and 8-bit** quantized vectors, evaluated on **MS MARCO v2.1** with real human-annotated relevance judgments.
+A demonstration of **TurboQuant**-inspired vector compression applied to Retrieval-Augmented Generation (RAG) pipelines. Compares full-precision float32 embeddings against **4-bit, 6-bit, and 8-bit** quantized vectors, evaluated across **3 diverse datasets**: MS MARCO v2.1, HotpotQA, and NQ Open.
 
-## v3 Improvements
+## v4 Improvements
 
-- **Numerical stability fix**: Magnitudes stored as float32 (was float16, which caused overflow warnings and NaN values for large embeddings)
-- **Multi-bit comparison**: Benchmarks 4-bit, 6-bit, and 8-bit quantization to show the accuracy/compression tradeoff
-- **500 MS MARCO queries**: Scaled up from 200 queries for more statistically robust results
-- **Pareto frontier plot**: Visualizes the optimal tradeoff between compression ratio and retrieval quality
+- **Multi-dataset benchmarking**: Evaluates across MS MARCO (factoid QA), HotpotQA (multi-hop reasoning), and NQ Open (Wikipedia evidence retrieval)
+- **Aggregate metrics**: Reports per-dataset results and cross-dataset averages for robust conclusions
+- **4 new visualization plots**: MRR heatmap, nDCG grouped bars, memory/latency dual-axis, and average summary
+- **Previous improvements (v3)**: Numerical stability fix (float32 magnitudes), multi-bit comparison, 500-query scale
 
 ## What is TurboQuant?
 
@@ -30,58 +30,77 @@ This demo implements a simplified version of TurboQuant's core principles applie
 - Stores sign bits as compact error correction codes
 - Reduces quantization bias during reconstruction
 
-## Dataset
+## Datasets
 
-**MS MARCO v2.1** (Microsoft Machine Reading Comprehension):
-
-- **Source**: 500 queries from the validation split
-- **Corpus**: ~5,000 unique passages
-- **Ground truth**: Human annotators marked which passages answer each query
+1. **MS MARCO v2.1** — 500 queries, ~5K passages, human `is_selected` labels (factoid QA)
+2. **HotpotQA** — 500 queries, ~5K passages, multi-hop reasoning with supporting facts
+3. **NQ Open** — 175 queries, ~1K Wikipedia chunks, answer-string evidence matching
 
 ## Quick Start
 
 ```bash
 pip install -r requirements.txt
-python benchmark.py       # Run full benchmark + generate plots (~15-20 min)
-python demo.py            # Interactive query demo
+python multi_benchmark.py  # Run multi-dataset benchmark (~20-30 min)
+python benchmark.py        # Run MS MARCO-only benchmark
+python demo.py             # Interactive query demo
 ```
 
-## Benchmark Results
+## Multi-Dataset Benchmark Results (v4)
 
-| Metric | Full Precision | TurboQ-4bit | TurboQ-6bit | TurboQ-8bit |
-|--------|---------------|-------------|-------------|-------------|
-| Precision@1 | 0.2791 | 0.2605 | 0.2651 | 0.2744 |
-| Precision@5 | 0.1479 | 0.1405 | 0.1516 | 0.1507 |
-| Precision@10 | 0.0940 | 0.0884 | 0.0940 | 0.0940 |
-| Recall@5 | 0.6775 | 0.6473 | 0.6930 | 0.6915 |
-| Recall@10 | 0.8589 | 0.8147 | 0.8589 | 0.8589 |
+### Aggregate Average (across all 3 datasets)
+
+| Metric | Full | TurboQ-4bit | TurboQ-6bit | TurboQ-8bit |
+|--------|------|-------------|-------------|-------------|
+| Avg MRR@10 | 0.4021 | 0.3733 | 0.3952 | 0.4036 |
+| Avg nDCG@10 | 0.3917 | 0.3641 | 0.3874 | 0.3916 |
+| Avg Memory | 1.0x | 3.8x smaller | 3.8x smaller | 3.8x smaller |
+| Avg Latency | 1.0x | 1.0x | 1.3x faster | 1.2x faster |
+
+### Per-Dataset: MS MARCO (215 queries, 4973 passages)
+
+| Metric | Full | TurboQ-4bit | TurboQ-6bit | TurboQ-8bit |
+|--------|------|-------------|-------------|-------------|
 | MRR@10 | 0.4596 | 0.4302 | 0.4495 | 0.4567 |
 | nDCG@10 | 0.5517 | 0.5171 | 0.5446 | 0.5495 |
-| Hit@1 | 0.2791 | 0.2605 | 0.2651 | 0.2744 |
-| Hit@5 | 0.6977 | 0.6651 | 0.7163 | 0.7116 |
-| Memory | 7.28 MB | 1.90 MB | 1.90 MB | 1.90 MB |
-| Latency | 13.10 ms | 6.82 ms | 6.26 ms | 6.90 ms |
 
-> 500 MS MARCO queries, 4973 unique passages, 215 valid queries with human-annotated relevance labels.
+### Per-Dataset: HotpotQA (500 queries, 4932 passages)
+
+| Metric | Full | TurboQ-4bit | TurboQ-6bit | TurboQ-8bit |
+|--------|------|-------------|-------------|-------------|
+| MRR@10 | 0.6451 | 0.5908 | 0.6370 | 0.6483 |
+| nDCG@10 | 0.5524 | 0.5035 | 0.5464 | 0.5532 |
+
+### Per-Dataset: NQ Open (175 queries, 974 passages)
+
+| Metric | Full | TurboQ-4bit | TurboQ-6bit | TurboQ-8bit |
+|--------|------|-------------|-------------|-------------|
+| MRR@10 | 0.1017 | 0.0988 | 0.0991 | 0.1057 |
+| nDCG@10 | 0.0711 | 0.0716 | 0.0712 | 0.0723 |
 
 ### Interpretation
 
-**4-bit is the sweet spot for most RAG use cases.** It provides the best compression ratio (~6x memory reduction) with only a small drop in retrieval quality (typically <5% MRR loss). 6-bit and 8-bit offer progressively better accuracy but diminishing returns on compression. The Pareto frontier plot (`plots/accuracy_vs_compression.png`) visualizes this tradeoff clearly.
+**8-bit quantization is effectively lossless across all datasets**, with only -0.3% average MRR drop and 3.8x memory reduction. 6-bit provides a good balance (1.7% MRR drop) with slightly better latency. 4-bit shows the largest quality gap (7.2% MRR drop) but remains viable for latency-insensitive applications. The multi-dataset evaluation confirms these tradeoffs are consistent across factoid QA, multi-hop reasoning, and evidence retrieval tasks.
 
 ## Project Structure
 
 ```
 turboq-demo/
-├── data_loader.py         # MS MARCO v2.1 dataset loader
-├── quantizer.py           # TurboQuantizer (PolarQuant + QJL) — v3: float32 magnitudes
+├── data_loader.py         # Dataset loaders (MS MARCO, HotpotQA, NQ Open)
+├── quantizer.py           # TurboQuantizer (PolarQuant + QJL)
 ├── pipeline_full.py       # Full-precision FAISS pipeline
 ├── pipeline_turboq.py     # TurboQuant compressed pipeline
 ├── evaluate.py            # IR metrics (P@k, R@k, MRR, nDCG, Hit@k)
-├── benchmark.py           # Multi-bit benchmark + plot generation
+├── multi_benchmark.py     # v4: Multi-dataset benchmark + aggregate plots
+├── benchmark.py           # v3: MS MARCO-only benchmark
 ├── demo.py                # Interactive CLI demo
 ├── requirements.txt
 ├── README.md
 └── plots/
+    ├── multi/
+    │   ├── multi_mrr_heatmap.png
+    │   ├── multi_ndcg_comparison.png
+    │   ├── multi_memory_latency.png
+    │   └── multi_average_summary.png
     ├── memory_comparison.png
     ├── latency_comparison.png
     ├── precision_at_k.png
@@ -93,5 +112,7 @@ turboq-demo/
 
 - [TurboQuant: Quantized KV Cache Compression via Progressive Quantization](https://arxiv.org/abs/2503.xxxxx) — Google Research, March 2026
 - [MS MARCO](https://microsoft.github.io/msmarco/) — Microsoft Machine Reading Comprehension
+- [HotpotQA](https://hotpotqa.github.io/) — Multi-hop Question Answering
+- [Natural Questions](https://ai.google.com/research/NaturalQuestions) — Google Research
 - [Sentence-Transformers](https://www.sbert.net/)
 - [FAISS](https://github.com/facebookresearch/faiss)
