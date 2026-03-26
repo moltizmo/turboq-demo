@@ -8,7 +8,7 @@ from pipeline_turboq import TurboQPipeline
 def main():
     print("=" * 60)
     print("  TurboQuant RAG Demo — MS MARCO v2.1")
-    print("  Full Precision vs 3-bit Compressed Retrieval")
+    print("  Full Precision vs 4-bit Compressed Retrieval")
     print("=" * 60)
 
     corpus, query_data = load_msmarco(n_queries=200)
@@ -45,7 +45,7 @@ def main():
             text = corpus[pid][:120].replace("\n", " ")
             print(f"#{rank} [Score: {score:.3f}] {text}...")
 
-        print(f"\n=== TURBOQ (3-bit compressed) ===")
+        print(f"\n=== TURBOQ (4-bit compressed) ===")
         for rank, (pid, score) in enumerate(turboq_results, 1):
             text = corpus[pid][:120].replace("\n", " ")
             print(f"#{rank} [Score: {score:.3f}] {text}...")

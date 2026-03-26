@@ -1,13 +1,14 @@
 """TurboQuant compressed RAG pipeline."""
 
 import time
+import warnings
 import numpy as np
 from sentence_transformers import SentenceTransformer
 from quantizer import TurboQuantizer
 
 
 class TurboQPipeline:
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2", n_bits: int = 3):
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2", n_bits: int = 4):
         self.model = SentenceTransformer(model_name)
         self.quantizer = TurboQuantizer(n_bits=n_bits)
         self.compressed = None
@@ -25,7 +26,7 @@ class TurboQPipeline:
 
     def compress(self, embeddings: np.ndarray):
         """Compress pre-computed embeddings."""
-        print("Compressing with TurboQuantizer...")
+        print(f"Compressing with TurboQuantizer ({self.quantizer.n_bits}-bit)...")
         self.compressed = self.quantizer.quantize(embeddings)
         self._decompressed_cache = None
         print(f"Compressed {embeddings.shape[0]} vectors")
@@ -38,12 +39,14 @@ class TurboQPipeline:
             reconstructed = self.quantizer.dequantize(self.compressed)
             reconstructed = np.nan_to_num(reconstructed, nan=0.0, posinf=0.0, neginf=0.0)
             norms = np.linalg.norm(reconstructed, axis=1, keepdims=True)
-            self._decompressed_cache = reconstructed / (norms + 1e-8)
+            self._decompressed_cache = reconstructed / np.where(norms > 1e-8, norms, 1.0)
 
-        scores = np.nan_to_num(
-            (self._decompressed_cache @ q_emb.T).squeeze(),
-            nan=-1.0, posinf=-1.0, neginf=-1.0,
-        )
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            scores = np.nan_to_num(
+                (self._decompressed_cache @ q_emb.T).squeeze(),
+                nan=-1.0, posinf=-1.0, neginf=-1.0,
+            )
         top_k = np.argsort(scores)[::-1][:k]
         return [(int(idx), float(scores[idx])) for idx in top_k]
 

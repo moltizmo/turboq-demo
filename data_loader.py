@@ -3,7 +3,7 @@
 from datasets import load_dataset
 
 
-def load_msmarco(n_queries: int = 200):
+def load_msmarco(n_queries: int = 500):
     """Load MS MARCO v2.1 validation set and build corpus + query_data.
 
     Returns:
