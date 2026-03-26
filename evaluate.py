@@ -1,129 +1,81 @@
-"""Evaluation metrics for comparing full-precision and TurboQuant pipelines."""
+"""IR evaluation metrics using real human-annotated relevance labels."""
 
-import time
 import numpy as np
-from tabulate import tabulate
 
 
-def precision_at_k(retrieved: list[int], relevant: set[int], k: int) -> float:
-    """Fraction of top-k retrieved that are relevant."""
-    top_k = retrieved[:k]
-    if not top_k:
-        return 0.0
-    return len(set(top_k) & relevant) / k
+def precision_at_k(retrieved_ids: list[int], relevant_ids: list[int], k: int) -> float:
+    retrieved_k = retrieved_ids[:k]
+    relevant_set = set(relevant_ids)
+    hits = sum(1 for r in retrieved_k if r in relevant_set)
+    return hits / k
 
 
-def recall_at_k(retrieved: list[int], relevant: set[int], k: int) -> float:
-    """Fraction of relevant items found in top-k."""
-    if not relevant:
-        return 0.0
-    top_k = retrieved[:k]
-    return len(set(top_k) & relevant) / len(relevant)
+def recall_at_k(retrieved_ids: list[int], relevant_ids: list[int], k: int) -> float:
+    retrieved_k = retrieved_ids[:k]
+    relevant_set = set(relevant_ids)
+    hits = sum(1 for r in retrieved_k if r in relevant_set)
+    return hits / len(relevant_set) if relevant_set else 0.0
 
 
-def evaluate_retrieval(full_pipeline, turboq_pipeline, queries: list[str],
-                       encode_fn, max_k: int = 10):
-    """Run evaluation across all queries, comparing both pipelines.
+def mrr_at_k(retrieved_ids: list[int], relevant_ids: list[int], k: int) -> float:
+    relevant_set = set(relevant_ids)
+    for rank, rid in enumerate(retrieved_ids[:k], 1):
+        if rid in relevant_set:
+            return 1.0 / rank
+    return 0.0
 
-    Args:
-        full_pipeline: FullPrecisionPipeline instance
-        turboq_pipeline: TurboQuantPipeline instance
-        queries: list of query strings
-        encode_fn: function that encodes a query string to embedding
-        max_k: maximum k for precision/recall computation
 
-    Returns:
-        dict with metrics
+def ndcg_at_k(retrieved_ids: list[int], relevant_ids: list[int], k: int) -> float:
+    relevant_set = set(relevant_ids)
+    dcg = sum(
+        (1.0 / np.log2(rank + 1))
+        for rank, rid in enumerate(retrieved_ids[:k], 1)
+        if rid in relevant_set
+    )
+    idcg = sum(
+        (1.0 / np.log2(rank + 1))
+        for rank in range(1, min(len(relevant_set), k) + 1)
+    )
+    return dcg / idcg if idcg > 0 else 0.0
+
+
+def hit_at_k(retrieved_ids: list[int], relevant_ids: list[int], k: int) -> float:
+    relevant_set = set(relevant_ids)
+    return 1.0 if any(r in relevant_set for r in retrieved_ids[:k]) else 0.0
+
+
+def evaluate_pipeline(pipeline, query_data: list[dict], k: int = 10) -> dict:
+    """Run full evaluation of a pipeline against query_data with real labels.
+
+    Returns dict of averaged metrics.
     """
-    precisions_full = {k: [] for k in range(1, max_k + 1)}
-    precisions_turboq = {k: [] for k in range(1, max_k + 1)}
-    recalls_full = {k: [] for k in range(1, max_k + 1)}
-    recalls_turboq = {k: [] for k in range(1, max_k + 1)}
-
-    full_latencies = []
-    turboq_latencies = []
-
-    full_scores_all = []
-    turboq_scores_all = []
-
-    print(f"Evaluating {len(queries)} queries...")
-    for query in queries:
-        q_emb = encode_fn(query)
-
-        # Full precision
-        t0 = time.perf_counter()
-        full_results = full_pipeline.query_embedding(q_emb, top_k=max_k)
-        full_latencies.append(time.perf_counter() - t0)
-
-        # TurboQuant
-        t0 = time.perf_counter()
-        turboq_results = turboq_pipeline.query(q_emb, top_k=max_k)
-        turboq_latencies.append(time.perf_counter() - t0)
-
-        # Ground truth = full precision top-5
-        relevant = {r["index"] for r in full_results[:5]}
-        full_retrieved = [r["index"] for r in full_results]
-        turboq_retrieved = [r["index"] for r in turboq_results]
-
-        for k in range(1, max_k + 1):
-            precisions_full[k].append(precision_at_k(full_retrieved, relevant, k))
-            precisions_turboq[k].append(precision_at_k(turboq_retrieved, relevant, k))
-            recalls_full[k].append(recall_at_k(full_retrieved, relevant, k))
-            recalls_turboq[k].append(recall_at_k(turboq_retrieved, relevant, k))
-
-        # Collect top-1 scores for scatter plot
-        full_scores_all.append(full_results[0]["score"])
-        turboq_scores_all.append(turboq_results[0]["score"])
-
-    # Aggregate
     metrics = {
-        "precision_full": {k: np.mean(v) for k, v in precisions_full.items()},
-        "precision_turboq": {k: np.mean(v) for k, v in precisions_turboq.items()},
-        "recall_full": {k: np.mean(v) for k, v in recalls_full.items()},
-        "recall_turboq": {k: np.mean(v) for k, v in recalls_turboq.items()},
-        "latency_full_ms": np.mean(full_latencies) * 1000,
-        "latency_turboq_ms": np.mean(turboq_latencies) * 1000,
-        "memory_full_mb": full_pipeline.memory_mb(),
-        "memory_turboq_mb": turboq_pipeline.memory_mb(),
-        "full_scores": np.array(full_scores_all),
-        "turboq_scores": np.array(turboq_scores_all),
+        "precision@1": [], "precision@3": [], "precision@5": [], "precision@10": [],
+        "recall@1": [], "recall@5": [], "recall@10": [],
+        "mrr@10": [], "ndcg@10": [],
+        "hit@1": [], "hit@5": [],
+        "latencies_ms": [],
     }
-    return metrics
 
+    for qd in query_data:
+        results, latency = pipeline.search_timed(qd["query"], k=k)
+        retrieved_ids = [r[0] for r in results]
+        rel = qd["relevant_ids"]
 
-def print_summary(metrics: dict):
-    """Print a formatted summary table."""
-    # Precision / Recall table
-    rows = []
-    for k in [1, 3, 5]:
-        rows.append([
-            f"@{k}",
-            f"{metrics['precision_full'][k]:.3f}",
-            f"{metrics['precision_turboq'][k]:.3f}",
-            f"{metrics['recall_full'][k]:.3f}",
-            f"{metrics['recall_turboq'][k]:.3f}",
-        ])
+        metrics["precision@1"].append(precision_at_k(retrieved_ids, rel, 1))
+        metrics["precision@3"].append(precision_at_k(retrieved_ids, rel, 3))
+        metrics["precision@5"].append(precision_at_k(retrieved_ids, rel, 5))
+        metrics["precision@10"].append(precision_at_k(retrieved_ids, rel, 10))
+        metrics["recall@1"].append(recall_at_k(retrieved_ids, rel, 1))
+        metrics["recall@5"].append(recall_at_k(retrieved_ids, rel, 5))
+        metrics["recall@10"].append(recall_at_k(retrieved_ids, rel, 10))
+        metrics["mrr@10"].append(mrr_at_k(retrieved_ids, rel, 10))
+        metrics["ndcg@10"].append(ndcg_at_k(retrieved_ids, rel, 10))
+        metrics["hit@1"].append(hit_at_k(retrieved_ids, rel, 1))
+        metrics["hit@5"].append(hit_at_k(retrieved_ids, rel, 5))
+        metrics["latencies_ms"].append(latency)
 
-    print("\n" + "=" * 60)
-    print("RETRIEVAL ACCURACY")
-    print("=" * 60)
-    print(tabulate(rows, headers=["k", "Prec(Full)", "Prec(TurboQ)",
-                                   "Recall(Full)", "Recall(TurboQ)"],
-                   tablefmt="grid"))
-
-    # Performance table
-    mem_reduction = metrics["memory_full_mb"] / metrics["memory_turboq_mb"]
-    latency_ratio = metrics["latency_full_ms"] / metrics["latency_turboq_ms"]
-
-    perf_rows = [
-        ["Memory (MB)", f"{metrics['memory_full_mb']:.2f}",
-         f"{metrics['memory_turboq_mb']:.2f}", f"{mem_reduction:.1f}x"],
-        ["Latency (ms)", f"{metrics['latency_full_ms']:.2f}",
-         f"{metrics['latency_turboq_ms']:.2f}", f"{latency_ratio:.2f}x"],
-    ]
-    print("\n" + "=" * 60)
-    print("PERFORMANCE COMPARISON")
-    print("=" * 60)
-    print(tabulate(perf_rows, headers=["Metric", "Full", "TurboQ", "Ratio"],
-                   tablefmt="grid"))
-    print()
+    avg = {}
+    for key, vals in metrics.items():
+        avg[key] = float(np.mean(vals))
+    return avg

@@ -1,6 +1,6 @@
 # TurboQuant RAG Demo
 
-A demonstration of **TurboQuant**-inspired vector compression applied to Retrieval-Augmented Generation (RAG) pipelines. Compares full-precision float32 embeddings against 3-bit quantized vectors to show the memory/accuracy tradeoff.
+A demonstration of **TurboQuant**-inspired vector compression applied to Retrieval-Augmented Generation (RAG) pipelines. Compares full-precision float32 embeddings against 3-bit quantized vectors, evaluated on **MS MARCO v2.1** with real human-annotated relevance judgments.
 
 ## What is TurboQuant?
 
@@ -23,6 +23,17 @@ This demo implements a simplified version of TurboQuant's core principles applie
 - Stores sign bits as compact error correction codes
 - Reconstructs an approximation of the lost precision during dequantization
 
+## Dataset
+
+**MS MARCO v2.1** (Microsoft Machine Reading Comprehension) — a large-scale real-world dataset with human-annotated relevance judgments:
+
+- **Source**: 200 queries from the validation split
+- **Corpus**: 1,993 unique passages
+- **Valid queries**: 89 queries with at least one human-labeled relevant passage
+- **Ground truth**: Human annotators marked which passages answer each query
+
+Unlike synthetic evaluation (using full-precision results as proxy ground truth), this benchmark uses real human judgments — the gold standard for IR evaluation.
+
 ## Quick Start
 
 ```bash
@@ -31,59 +42,46 @@ python benchmark.py       # Run full benchmark + generate plots
 python demo.py            # Interactive query demo
 ```
 
+## Benchmark Results
+
+| Metric | Full Precision | TurboQ (3-bit) | Delta |
+|--------|---------------|----------------|-------|
+| Precision@1 | 0.2247 | 0.1236 | -0.1011 |
+| Precision@5 | 0.1371 | 0.1213 | -0.0157 |
+| Precision@10 | 0.0921 | 0.0854 | -0.0067 |
+| Recall@5 | 0.6330 | 0.5730 | -0.0599 |
+| Recall@10 | 0.8558 | 0.8034 | -0.0524 |
+| MRR@10 | 0.4027 | 0.3146 | -0.0881 |
+| nDCG@10 | 0.5054 | 0.4243 | -0.0811 |
+| Hit@1 | 0.2247 | 0.1236 | -0.1011 |
+| Hit@5 | 0.6629 | 0.5955 | -0.0674 |
+| Memory | 2.92 MB | 0.75 MB | **3.9x reduction** |
+| Latency | 39.68 ms | 8.31 ms | **4.8x faster** |
+
 ## Project Structure
 
 ```
 turboq-demo/
+├── data_loader.py         # MS MARCO v2.1 dataset loader
 ├── quantizer.py           # TurboQuantizer (PolarQuant + QJL)
 ├── pipeline_full.py       # Full-precision FAISS pipeline
 ├── pipeline_turboq.py     # TurboQuant compressed pipeline
-├── evaluate.py            # Precision/Recall/Latency metrics
+├── evaluate.py            # IR metrics (P@k, R@k, MRR, nDCG, Hit@k)
 ├── benchmark.py           # End-to-end benchmark + plot generation
 ├── demo.py                # Interactive CLI demo
 ├── requirements.txt
 ├── README.md
-└── plots/                 # Generated benchmark plots
+└── plots/
     ├── memory_comparison.png
     ├── latency_comparison.png
     ├── precision_at_k.png
+    ├── mrr_ndcg_comparison.png
     └── score_correlation.png
 ```
-
-## Components
-
-### Full Precision Pipeline
-- Generates 384-dim float32 embeddings using `all-MiniLM-L6-v2`
-- Stores in a FAISS `IndexFlatIP` (inner product / cosine similarity)
-- Baseline for accuracy and memory measurements
-
-### TurboQuant Pipeline
-- Compresses embeddings using PolarQuant (magnitude + 3-bit direction)
-- Applies QJL sign-bit error correction
-- Dequantizes on-the-fly for retrieval
-- Computes cosine similarity against dequantized vectors
-
-### Evaluation
-- **Retrieval accuracy**: Precision@k and Recall@k (k=1,3,5,10)
-- **Ground truth**: Full-precision top-5 results treated as relevant set
-- **Latency**: Average query time in milliseconds
-- **Memory**: Byte-level comparison of both representations
-
-## Interpreting Results
-
-- **Precision@k** measures what fraction of the top-k quantized results match the full-precision top-5. High values (>0.8) indicate minimal accuracy loss from compression.
-- **Memory reduction** of ~3-5x is expected from 3-bit quantization with float16 magnitudes.
-- **Score correlation** (scatter plot) should cluster tightly around the y=x diagonal, confirming that similarity scores are well-preserved.
-- Latency differences depend on hardware; the quantized pipeline trades FAISS optimization for numpy-based similarity but uses less memory bandwidth.
-
-## Dataset
-
-Uses the [SQuAD](https://huggingface.co/datasets/squad) dataset:
-- 500 deduplicated passage contexts as the corpus
-- 50 questions as evaluation queries
 
 ## References
 
 - [TurboQuant: Quantized KV Cache Compression via Progressive Quantization](https://arxiv.org/abs/2503.xxxxx) — Google Research, March 2026
+- [MS MARCO](https://microsoft.github.io/msmarco/) — Microsoft Machine Reading Comprehension
 - [Sentence-Transformers](https://www.sbert.net/)
 - [FAISS](https://github.com/facebookresearch/faiss)
